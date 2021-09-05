@@ -134,40 +134,58 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
     }
 }
 
+double calcStddev(double mean, std::vector<double> x)
+{
+    double stdDev = 0.0;
+    if (x.size() < 1)
+    {
+        return 0;
+    }
+
+    for (auto val : x)
+    {
+        stdDev += pow(val - mean, 2);
+    }
+
+    return sqrt(stdDev / x.size());
+}
 
 // associate a given bounding box with the keypoints it contains
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
 {
-    double meanDistance = 0.0;
-    vector<cv::DMatch> insideMatches;
-    for (auto &match : kptMatches)
+    std::map<vector<cv::DMatch>::iterator, double> theMap;
+    vector<double> euclideanDistances;
+    for (auto it = kptMatches.begin(); it != kptMatches.end(); it++)
     {
-        cv::KeyPoint currPoints = kptsCurr[match.trainIdx];
+        cv::KeyPoint currPoints = kptsCurr[it->trainIdx];
+        cv::KeyPoint prevPoints = kptsPrev[it->queryIdx];
         if (boundingBox.roi.contains(currPoints.pt))
         {
-            insideMatches.push_back(match);
+            theMap[it] = cv::norm(currPoints.pt - prevPoints.pt);
+            euclideanDistances.push_back(cv::norm(currPoints.pt - prevPoints.pt));
+            //cout << cv::norm(currPoints.pt - prevPoints.pt) << endl;
         }
     }
-    // DMatch.distance - Distance between descriptors. The lower, the better similarity
-    for (auto &insideMatch : insideMatches)
-    {
-        meanDistance += insideMatch.distance;
-    }
 
-    if (insideMatches.size() > 0)
-    {
-        meanDistance = meanDistance / insideMatches.size();
-    }
-    else
+    if (euclideanDistances.size() < 0)
     {
         return;
     }
 
-    for (auto &insideMatch : insideMatches)
+    double mean = 0;
+    for (auto val : euclideanDistances)
     {
-        if (insideMatch.distance < meanDistance)
+        mean += val;
+    }
+    mean = mean / euclideanDistances.size();
+    double stdDev = calcStddev(mean, euclideanDistances);
+    //cout << "mean : " << mean << " stdDev : " << stdDev << endl;
+
+    for (auto const &pair : theMap)
+    {
+        if ((pair.second - mean) < stdDev)
         {
-            boundingBox.kptMatches.push_back(insideMatch);
+            boundingBox.kptMatches.push_back(*pair.first);
         }
     }
 }

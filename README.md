@@ -139,36 +139,39 @@ Prepare the TTC computation based on camera measurements by associating keypoint
 ```
 void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint> &kptsPrev, std::vector<cv::KeyPoint> &kptsCurr, std::vector<cv::DMatch> &kptMatches)
 {
-    double meanDistance = 0.0;
-    vector<cv::DMatch> insideMatches;
-    for (auto &match : kptMatches)
+    std::map<vector<cv::DMatch>::iterator, double> theMap;
+    vector<double> euclideanDistances;
+    for (auto it = kptMatches.begin(); it != kptMatches.end(); it++)
     {
-        cv::KeyPoint currPoints = kptsCurr[match.trainIdx];
+        cv::KeyPoint currPoints = kptsCurr[it->trainIdx];
+        cv::KeyPoint prevPoints = kptsPrev[it->queryIdx];
         if (boundingBox.roi.contains(currPoints.pt))
         {
-            insideMatches.push_back(match);
+            theMap[it] = cv::norm(currPoints.pt - prevPoints.pt);
+            euclideanDistances.push_back(cv::norm(currPoints.pt - prevPoints.pt));
+            //cout << cv::norm(currPoints.pt - prevPoints.pt) << endl;
         }
     }
-    // DMatch.distance - Distance between descriptors. The lower, the better similarity
-    for (auto &insideMatch : insideMatches)
-    {
-        meanDistance += insideMatch.distance;
-    }
 
-    if (insideMatches.size() > 0)
-    {
-        meanDistance = meanDistance / insideMatches.size();
-    }
-    else
+    if (euclideanDistances.size() < 0)
     {
         return;
     }
 
-    for (auto insideMatch:insideMatches)
+    double mean = 0;
+    for (auto val : euclideanDistances)
     {
-        if (insideMatch.distance < meanDistance)
+        mean += val;
+    }
+    mean = mean / euclideanDistances.size();
+    double stdDev = calcStddev(mean, euclideanDistances);
+    //cout << "mean : " << mean << " stdDev : " << stdDev << endl;
+
+    for (auto const &pair : theMap)
+    {
+        if ((pair.second - mean) < stdDev)
         {
-            boundingBox.kptMatches.push_back(insideMatch);
+            boundingBox.kptMatches.push_back(*pair.first);
         }
     }
 }
@@ -247,9 +250,9 @@ Find examples where the TTC estimate of the Lidar sensor does not seem plausible
 Run several detector / descriptor combinations and look at the differences in TTC estimation. Find out which methods perform best and also include several examples where camera-based TTC estimation is way off. As with Lidar, describe your observations again and also look into potential reasons.
 
 Based on the result from the table below, the TOP 3 detector/descriptor combinations:
-* FAST + BRISK
-* SHITOMASI + FREAK
-* SHITOMASI + FAST
+* FAST + SIFT
+* SHITOMASI + BRIEF
+* BRISK + AKAZE
 
 Factors that will affect the Camera TTC results:
 1. YOLOv3 bounding box detection, if the bounding box area is bigger, it will extract more feature
@@ -257,46 +260,45 @@ Factors that will affect the Camera TTC results:
 
 | Detector | Descriptor | Frame compare | LIDAR TTC | Camera TTC | TTC Difference |
 | ---      | ---        | ---           | ---       | ---        | ---            |
-| SHITOMASI | BRISK | 1 - 2 | 12.4156 | 12.9602 | -0.544608 |
-| SHITOMASI | BRIEF | 1 - 2 | 12.4156 | 13.0092 | -0.593649 |
-| SHITOMASI | ORB | 1 - 2 | 12.4156 | 13.3067 | -0.891117 |
-| SHITOMASI | FREAK | 1 - 2 | 12.4156 | 12.3292 | 0.0864497 |
-| SHITOMASI | AKAZE | 1 - 2 | x | x | x |
-| SHITOMASI | SIFT | 1 - 2 | 12.4156 | 12.3292 | 0.0864497 |
+| SHITOMASI | BRISK | 1 - 2 | 12.4156 | 13.7165 | -1.30089 |
+| SHITOMASI | BRIEF | 1 - 2 | 12.4156 | 12.7726 | -0.357031 |
+| SHITOMASI | ORB | 1 - 2 | 12.4156 | 13.3899 | -0.974339 |
+| SHITOMASI | FREAK | 1 - 2 | 12.4156 | 13.3899 | -0.974339 |
+| SHITOMASI | AKAZE | 1 - 2 | 12.4156 | x | x |
+| SHITOMASI | SIFT | 1 - 2 | 12.4156 | 13.1925 | -0.776853 |
 | HARRIS | BRISK | 1 - 2 | 12.4156 | nan | nan |
-| HARRIS | BRIEF | 1 - 2 | 12.4156 | 80.7525 | -68.3369 |
+| HARRIS | BRIEF | 1 - 2 | 12.4156 | nan | nan |
 | HARRIS | ORB | 1 - 2 | 12.4156 | nan | nan |
 | HARRIS | FREAK | 1 - 2 | 12.4156 | nan | nan |
 | HARRIS | AKAZE | 1 - 2 | 12.4156 | 80.7525 | -68.3369 |
 | HARRIS | SIFT | 1 - 2 | 12.4156 | 80.7525 | -68.3369 |
-| FAST | BRISK | 1 - 2 | 12.4156 | 12.4822 | -0.0665892 |
-| FAST | BRIEF | 1 - 2 | 12.4156 | 11.7261 | 0.689496 |
-| FAST | ORB | 1 - 2 | 12.4156 | 11.3289 | 1.08675 |
-| FAST | FREAK | 1 - 2 | 12.4156 | 14.108 | -1.69238 |
-| FAST | AKAZE | 1 - 2 | 12.4156 | 11.7009 | 0.714749 |
-| FAST | SIFT | 1 - 2 | 12.4156 | 11.7261 | 0.689496 |
-| BRISK | BRISK | 1 - 2 | 12.4156 | 20.505 | -8.08943 |
-| BRISK | BRIEF | 1 - 2 | 12.4156 | 17.0514 | -4.63578 |
-| BRISK | ORB | 1 - 2 | 12.4156 | 17.6458 | -5.23024 |
-| BRISK | FREAK | 1 - 2 | 12.4156 | 21.7186 | -9.30297 |
-| BRISK | AKAZE | 1 - 2 | 12.4156 | 13.2426 | -0.827039 |
-| BRISK | SIFT | 1 - 2 | 12.4156 | 17.1507 | -4.73514 |
-| ORB | BRISK | 1 - 2 | 12.4156 | 10.9367 | 1.47893 |
-| ORB | BRIEF | 1 - 2 | 12.4156 | 13.0997 | -0.684068 |
-| ORB | FREAK | 1 - 2 | 12.4156 | 9.94887 | 2.46673 |
-| ORB | ORB | 1 - 2 | 12.4156 | 10.6151 | 1.80047 |
-| ORB | FREAK | 1 - 2 | 12.4156 | 9.94887 | 2.46673 |
-| ORB | AKAZE | 1 - 2 | 12.4156 | 10.1226 | 2.29302 |
-| ORB | SIFT | 1 - 2 | 12.4156 | 9.95376 | 2.46184 |
-| AKAZE | BRISK | 1 - 2 | 12.4156 | 14.2866 | -1.87096 |
-| AKAZE | BRIEF | 1 - 2 | 12.4156 | 14.29 | -1.87436 |
-| AKAZE | ORB | 1 - 2 | 12.4156 | 14.3927 | -1.97713 |
-| AKAZE | FREAK | 1 - 2 | 12.4156 | 12.3707 | 0.04486 |
-| AKAZE | AKAZE | 1 - 2 | 12.4156 | 13.9228 | -1.50722 |
-| AKAZE | SIFT | 1 - 2 | 12.4156 | 14.9833 | -2.56774 |
-| SIFT | BRISK | 1 - 2 | 12.4156 | 14.8783 | -2.46271 |
-| SIFT | BRIEF | 1 - 2 | 12.4156 | 15.8584 | -3.44285 |
+| FAST | BRISK | 1 - 2 | 12.4156 | 11.5837 | 0.831864 |
+| FAST | BRIEF | 1 - 2 | 12.4156 | 11.6641 | 0.751453 |
+| FAST | ORB | 1 - 2 | 12.4156 | 11.0816 | 1.33404 |
+| FAST | FREAK | 1 - 2 | 12.4156 | 14.338 | -1.92244 |
+| FAST | AKAZE | 1 - 2 | 12.4156 | 11.0639 | 1.35165 |
+| FAST | SIFT | 1 - 2 | 12.4156 | 12.0866 | 0.328996 |
+| BRISK | BRISK | 1 - 2 | 12.4156 | 23.397 | -10.9814 |
+| BRISK | BRIEF | 1 - 2 | 12.4156 | 24.3684 | -11.9528 |
+| BRISK | ORB | 1 - 2 | 12.4156 | 17.7177 | -5.30207 |
+| BRISK | FREAK | 1 - 2 | 12.4156 | 24.8826 | -12.467 |
+| BRISK | AKAZE | 1 - 2 | 12.4156 | 11.8352 | 0.580431 |
+| BRISK | SIFT | 1 - 2 | 12.4156 | 16.2788 | -3.8632 |
+| ORB | BRISK | 1 - 2 | 12.4156 | 10.6151 | 1.80047 |
+| ORB | BRIEF | 1 - 2 | 12.4156 | -82.8256 | 95.2412 |
+| ORB | ORB | 1 - 2 | 12.4156 | 10.1192 | 2.29645 |
+| ORB | FREAK | 1 - 2 | 12.4156 | 10.7758 | 1.63981 |
+| ORB | AKAZE | 1 - 2 | 12.4156 | 10.8795 | 1.53609 |
+| ORB | SIFT | 1 - 2 | 12.4156 | 9.20431 | 3.21129 |
+| AKAZE | BRISK | 1 - 2 | 12.4156 | 17.816 | -5.40043 |
+| AKAZE | BRIEF | 1 - 2 | 12.4156 | 16.3722 | -3.95663 |
+| AKAZE | ORB | 1 - 2 | 12.4156 | 17.2188 | -4.80319 |
+| AKAZE | FREAK | 1 - 2 | 12.4156 | 15.4471 | -3.03146 |
+| AKAZE | AKAZE | 1 - 2 | 12.4156 | 15.722 | -3.30636 |
+| AKAZE | SIFT | 1 - 2 | 12.4156 | 17.5661 | -5.15046 |
+| SIFT | BRISK | 1 - 2 | 12.4156 | 13.7393 | -1.32368 |
+| SIFT | BRIEF | 1 - 2 | 12.4156 | 14.4221 | -2.00649 |
 | SIFT | ORB | 1 - 2 | 12.4156 | x | x |
-| SIFT | FREAK | 1 - 2 | 12.4156 | 13.5379 | -1.12232 |
-| SIFT | AKAZE | 1 - 2 | 12.4156 | 14.7038 | -2.28821 |
-| SIFT | SIFT | 1 - 2 | 12.4156 | 14.2607 | -1.8451 |
+| SIFT | FREAK | 1 - 2 | 12.4156 | 14.219 | -1.80339 |
+| SIFT | AKAZE | 1 - 2 | 12.4156 | 10.1809 | 2.23467 |
+| SIFT | SIFT | 1 - 2 | 12.4156 | 13.43 | -1.01439 |
